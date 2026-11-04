@@ -34,7 +34,7 @@ try {
         $env:GH_CONFIG_DIR = (Resolve-Path -LiteralPath $GitHubConfigDirectory).ProviderPath
     }
 
-    $ghCommand = Get-Command gh -CommandType Application -ErrorAction SilentlyContinue
+    $ghCommand = Get-Command gh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($ghCommand) {
         $ghExecutable = $ghCommand.Source
     } elseif (Test-Path -LiteralPath 'C:\Program Files\GitHub CLI\gh.exe' -PathType Leaf) {
@@ -42,7 +42,7 @@ try {
     } else {
         throw 'GitHub CLI nao encontrado. Instale o gh e autentique com gh auth login.'
     }
-    $gitExecutable = (Get-Command git -CommandType Application -ErrorAction Stop).Source
+    $gitExecutable = (Get-Command git -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 
     Push-Location -LiteralPath $repositoryRoot
     $locationChanged = $true
