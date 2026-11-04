@@ -4,6 +4,23 @@ Aplicativo Android para controlar notas fiscais, valores, bancos ou recursos pr�
 
 A versão 2.0 está em desenvolvimento. A sincronização entre celulares depende da configuração do Supabase descrita em [backend/README.md](backend/README.md). Nenhum servidor remoto ou envio automático de WhatsApp está ativado.
 
+## Telas do app
+
+Capturas da interface no navegador, em formato de celular, com dados fictícios. Clique em uma imagem para ampliá-la.
+
+<table>
+  <tr><th>Painel de acompanhamento</th><th>Notas e pagamentos</th></tr>
+  <tr>
+    <td><a href="docs/images/resumo.jpg"><img src="docs/images/resumo.jpg" width="260" alt="Painel do NotaFlow com total de notas, pagamentos e vencimentos"></a></td>
+    <td><a href="docs/images/notas.jpg"><img src="docs/images/notas.jpg" width="260" alt="Lista de notas com filtros, valores, consultor, banco e situação do pagamento"></a></td>
+  </tr>
+  <tr><th>Central de Cobranças</th><th>Cadastro de nota fiscal</th></tr>
+  <tr>
+    <td><a href="docs/images/cobrancas.jpg"><img src="docs/images/cobrancas.jpg" width="260" alt="Central de Cobranças com notas em aberto, atrasadas e consultores responsáveis"></a></td>
+    <td><a href="docs/images/cadastro.jpg"><img src="docs/images/cadastro.jpg" width="260" alt="Cadastro de NF com cliente, consultor, valor, banco, prazo e vencimento calculado"></a></td>
+  </tr>
+</table>
+
 ## Instalar e executar
 
 No Android 8 ou superior, instale o APK fornecido separadamente e permita as notificações quando solicitado. APKs, dados pessoais e chaves de assinatura não são versionados.
