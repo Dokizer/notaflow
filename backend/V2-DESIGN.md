@@ -1,0 +1,13 @@
+# Migração 2.0
+
+`schema.sql` continua sendo a migração original 1.1. A atualização será uma nova transação em `migrations/002_v2.sql`, executada depois da migração original. Não atualiza notas antigas e não altera qualquer evento existente: IDs, valores, versões e snapshots históricos permanecem iguais.
+
+As novas entidades usam `workspace_id`; todos os relacionamentos de consultor, cliente, nota e notificação usam chaves estrangeiras compostas com a conta. Leitura usa RLS por proprietário. Escrita usa somente RPCs que verificam autenticação, conta, tipos, campos permitidos e versões. Consultores podem ficar inativos, preservando os vínculos e nomes registrados nas notas. Notas novas podem ter consultor vazio ou consultor dinâmico; o nome vinculado é copiado pelo servidor. A migração preserva o texto e deixa o vínculo das notas antigas nulo.
+
+Clientes têm uma chave de nome normalizado. A chave de duplicidade combina cliente sem acentos/caixa/espaços extras e NF; NFs somente numéricas ignoram zeros à esquerda. Não há índice único de NF que impeça atualizar um banco com duplicações antigas. Importações bloqueiam a conta durante a transação, registram um UUID de lote e seu resultado, rejeitam reutilização do UUID com conteúdo diferente e retornam o mesmo resultado em tentativas repetidas. Todo lote é atômico. Apenas linhas validadas pela prévia devem ser enviadas; qualquer linha inválida causa rollback. Não se guarda o arquivo original.
+
+RPCs novos: `save_consultant(p_consultant,p_expected_version)`, `get_billing_settings(p_workspace_id)`, `save_billing_settings(p_workspace_id,p_rules)`, `cancel_invoice(p_id,p_cancelled,p_expected_version)`, `record_notification(p_notification)`, `confirm_notification(p_id)` e `import_invoices(p_workspace_id,p_batch)`. Listagens usam tabelas com RLS. A conta continua tendo somente seu proprietário, sem perfis ou administradores fictícios.
+
+Notificação manual registra somente preparação, falha ou confirmação declarada pelo usuário. Nenhum registro é chamado de envio confirmado pela API. O telefone precisa ser o telefone atual do consultor associado. Pagamento, cancelamento, inatividade e avisos desativados bloqueiam novas cobranças. Histórico de importação e eventos é imutável.
+
+A preparação da API oficial será feita depois da conclusão das etapas anteriores. O adaptador ficará exclusivamente no backend, desativado por padrão, com credenciais fornecidas pelo ambiente do servidor, autorização explícita do administrador, opt-in por consultor, templates aprovados configurados, fila persistente com deduplicação/leases, tentativas limitadas, limites de envio e verificação HMAC de webhook. Nenhum projeto remoto, agendamento ou envio real será criado nesta entrega.
