@@ -75,7 +75,7 @@ try {
     $authorizationHeader = 'AUTHORIZATION: basic ' + [Convert]::ToBase64String($credentialBytes)
     foreach ($name in @('GIT_TRACE', 'GIT_TRACE_CURL', 'GIT_CURL_VERBOSE',
         'GIT_TRACE_PACKET', 'GIT_TRACE2', 'GIT_TRACE2_EVENT', 'GIT_TRACE2_PERF')) {
-        [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+        Remove-Item -LiteralPath ('Env:' + $name) -ErrorAction SilentlyContinue
     }
     $env:GIT_TRACE_REDACT = '1'
     $env:GIT_CONFIG_COUNT = '2'
@@ -138,7 +138,11 @@ try {
     $authorizationHeader = $null
     try {
         foreach ($name in $environmentNames) {
-            [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process')
+            if ($null -eq $previousEnvironment[$name]) {
+                Remove-Item -LiteralPath ('Env:' + $name) -ErrorAction SilentlyContinue
+            } else {
+                [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process')
+            }
         }
     } finally {
         $previousEnvironment.Clear()
