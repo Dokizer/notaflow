@@ -34,3 +34,7 @@ Use JDK 17 ou superior, Android Platform 35 em `toolchain/sdk/platform` e Build 
 ```
 
 O resultado fica em `dist/NotaFlow.apk`. Guarde a chave gerada em `toolchain/signing` em local privado: futuras atualizações devem usar a mesma chave. Nunca envie essa pasta ao GitHub.
+
+## Sincronização
+
+As alterações feitas pelo Codex devem ser revisadas, salvas em commits em português e enviadas automaticamente à `main`, conforme [AGENTS.md](AGENTS.md). Após autenticar o GitHub CLI, `toolchain/push-github.ps1` envia os commits e confere se o commit local coincide com o remoto.
