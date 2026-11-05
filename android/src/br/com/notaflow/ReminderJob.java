@@ -43,8 +43,43 @@ public final class ReminderJob extends JobService {
  }
  static int configuredHour(Context c){try{JSONObject state=new JSONObject(SecureStore.get(c,"state","{}")),stored=new JSONObject(SecureStore.get(c,"reminder_context","{}"));return new Policy(context(state,stored).optJSONObject("billingRules")).hour;}catch(Exception invalid){return 9;}}
  static void schedule(Context c){
-  NotificationManager n=c.getSystemService(NotificationManager.class);NotificationChannel alerts=new NotificationChannel("reminders","Prazos e resumo de notas",NotificationManager.IMPORTANCE_DEFAULT);alerts.setDescription("Avisos locais de vencimento e resumo no horário configurado");n.createNotificationChannel(alerts);n.createNotificationChannel(new NotificationChannel("payments","Pagamentos confirmados",NotificationManager.IMPORTANCE_DEFAULT));
+  NotificationManager n=c.getSystemService(NotificationManager.class);NotificationChannel alerts=new NotificationChannel("reminders","Prazos e resumo de notas",NotificationManager.IMPORTANCE_HIGH);alerts.setDescription("Avisos locais de vencimento e resumo no horário configurado");alerts.enableVibration(true);n.createNotificationChannel(alerts);n.createNotificationChannel(new NotificationChannel("payments","Pagamentos confirmados",NotificationManager.IMPORTANCE_DEFAULT));
   JobScheduler jobs=c.getSystemService(JobScheduler.class);if(jobs.getPendingJob(17)==null)jobs.schedule(new JobInfo.Builder(17,new ComponentName(c,ReminderJob.class)).setPeriodic(6*60*60*1000L,60*60*1000L).setPersisted(true).build());DailyReceiver.schedule(c);
+ }
+ static void checkNow(Context c){
+  if(!enabled(c))return;
+  synchronized(SecureStore.LOCK){try{
+   JSONObject state=new JSONObject(SecureStore.get(c,"state","{}"));
+   JSONArray rows=state.optJSONArray("invoices");
+   if(rows==null||rows.length()==0)rows=new JSONArray(SecureStore.get(c,"invoices","[]"));
+   if(rows==null||rows.length()==0)return;
+   String day=LocalDate.now().toString();
+   int unpaid=0,overdue=0,dueToday=0;StringBuilder summary=new StringBuilder();
+   for(int n=0;n<rows.length();n++){
+    JSONObject row=rows.optJSONObject(n);
+    if(row==null||present(row,"paid_at")||present(row,"cancelled_at"))continue;
+    String billing=row.optString("billing_date");
+    String explicit=row.isNull("due_date")?null:row.optString("due_date");
+    int term=row.optInt("term_days",5);
+    int days=ReminderRules.daysUntil(billing,term,explicit,day);
+    unpaid++;
+    if(days<0){
+     overdue++;
+     if(overdue<=3){
+      if(summary.length()>0)summary.append(", ");
+      summary.append(row.optString("client_name")).append(" (NF ").append(row.optString("nf_number")).append(")");
+     }
+    }else if(days==0){dueToday++;}
+   }
+   if(overdue>0){
+    String detail=overdue+" NF(s) em atraso! "+summary.toString();
+    show(c,"reminders",300003,"🔴 NotaFlow · Atenção aos Prazos",detail,0xffcc4c4c);
+   }else if(dueToday>0){
+    show(c,"reminders",300002,"🟡 NotaFlow · Vencendo Hoje",dueToday+" NF(s) com vencimento hoje.",0xffc69422);
+   }else if(unpaid>0){
+    show(c,"reminders",1003,"🟢 NotaFlow · Recebimentos em dia",unpaid+" NF(s) pendentes dentro do prazo.",0xff087e71);
+   }
+  }catch(Exception ignored){}}
  }
  @Override public boolean onStartJob(JobParameters params){stopped=false;new Thread(()->{try{if(!MainActivity.active)try{CloudSync.sync(this);}catch(Exception ignored){}if(!stopped)check(this,new JSONArray());}catch(Exception ignored){}finally{jobFinished(params,false);}},"invoice-reminders").start();return true;}
  @Override public boolean onStopJob(JobParameters params){stopped=true;return true;}

@@ -16,3 +16,4 @@
 .notification-summary{margin-bottom:22px}.notification-summary .section-desc{margin-bottom:0}
 
 .whatsapp-message{font:12px/1.8 inherit;white-space:pre-wrap;overflow-wrap:anywhere;background:#edf4ed;border:1px solid #dce8dc;padding:16px;border-radius:12px;margin:0}.invoice-card>.whatsapp-button{width:100%}
+.invoice-notify-group{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}.invoice-notify-group .secondary{flex:1;min-width:120px;justify-content:center;font-size:11px}.invoice-notify-box{margin-top:10px}

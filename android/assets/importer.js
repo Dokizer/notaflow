@@ -14,6 +14,7 @@
     {key:'due_date',label:'Data de vencimento',required:false,aliases:['vencimento','data de vencimento','data vencimento','venc','vence em']},
     {key:'amount_cents',label:'Valor da nota fiscal',required:true,aliases:['valor','valor da nota fiscal','valor da nota','valor nf','valor da nf','valor r','valor r$','total','valor total']},
     {key:'consultant',label:'Consultor ou vendedor',required:false,aliases:['consultor','consultor responsavel','consultor ou vendedor','vendedor','responsavel','vendedor responsavel','nome do consultor']},
+    {key:'consultant_email',label:'E-mail do consultor',required:false,aliases:['email','e-mail','email do consultor','e-mail do consultor','email consultor','e-mail consultor','correio eletronico','contato email','e-mail do vendedor','email vendedor']},
     {key:'consultant_phone',label:'Telefone do consultor',required:false,aliases:['telefone','telefone do consultor','telefone consultor','telefone do vendedor','celular','whatsapp','fone']},
     {key:'funding_source',label:'Origem dos recursos',required:false,aliases:['origem dos recursos','origem do recurso','origem','fonte de recursos','funding source']},
     {key:'bank_name',label:'Nome do banco',required:false,aliases:['banco','nome do banco','instituicao financeira']}
@@ -279,7 +280,7 @@
     if(!Number.isInteger(defaultTerm)||defaultTerm<0||defaultTerm>3650)throw new Error('O prazo padrão deve ser um número inteiro de 0 a 3650 dias.');
     const defaults=options.defaults||{},seen=new Set((options.existingInvoices||[]).map(duplicateKey)),rows=[],valid=[],counts={total:0,valid:0,invalid:0,duplicate:0,empty:0};
     for(const row of table.rows){
-      const errors=[],warnings=[],value={client_name:'',nf_number:'',billing_date:'',term_days:defaultTerm,due_date:null,amount_cents:null,consultant:'',consultant_phone:'',funding_source:'unspecified',bank_name:'',paid_at:null,cancelled_at:null};
+      const errors=[],warnings=[],value={client_name:'',nf_number:'',billing_date:'',term_days:defaultTerm,due_date:null,amount_cents:null,consultant:'',consultant_email:'',consultant_phone:'',funding_source:'unspecified',bank_name:'',paid_at:null,cancelled_at:null};
       const cells=row.cells||[],isEmpty=cells.every(cell=>!cellText(cell));
       const result={sourceRow:row.sourceRow,status:isEmpty?'empty':'invalid',value,errors,warnings};rows.push(result);counts.total++;
       if(isEmpty){counts.empty++;continue;}
@@ -288,6 +289,15 @@
       const raw=key=>{const cell=get(key);return cell&&cell.v!==undefined?cell.v:'';};
       for(const field of FIELDS){const cell=get(field.key);if(cell&&(cell.f||cell.t==='e'))errors.push(field.label+': '+(cell.f?'fórmula não permitida. Substitua por um valor fixo.':'célula com erro na planilha.'));}
       value.client_name=text('client_name');value.nf_number=text('nf_number');value.consultant=text('consultant')||String(defaults.consultant||'').trim();
+      const emailCell=text('consultant_email');
+      if(emailCell){
+        const cleanEmail=String(emailCell).trim().toLowerCase();
+        if(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)&&cleanEmail.length<=254){
+          value.consultant_email=cleanEmail;
+        }else{
+          warnings.push('E-mail do consultor inválido ("'+emailCell+'"). O e-mail será ignorado.');
+        }
+      }
       const nfCell=get('nf_number');if(nfCell&&typeof nfCell.v==='number'&&(!Number.isSafeInteger(nfCell.v)||nfCell.v<0))errors.push('Número da NF inválido ou impreciso. Formate a coluna como texto no Excel.');
       if(!value.client_name||value.client_name.length>160||/[\x00-\x1f]/.test(value.client_name.replace(/[\r\n\t]/g,'')))errors.push('Informe o cliente com até 160 caracteres.');
       if(!value.nf_number||value.nf_number.length>80||/[\x00-\x1f]/.test(value.nf_number))errors.push('Informe o número da NF com até 80 caracteres.');

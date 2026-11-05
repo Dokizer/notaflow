@@ -66,6 +66,41 @@ public final class MainActivity extends Activity {
    if(Looper.myLooper()==Looper.getMainLooper())launch.run();else{runOnUiThread(launch);try{if(!completed.await(3,TimeUnit.SECONDS)){pending.set(false);return false;}}catch(InterruptedException interrupted){pending.set(false);Thread.currentThread().interrupt();return false;}}
    return opened.get();
   }
+  @JavascriptInterface public boolean openEmail(String email, String subject, String body){
+   final AtomicBoolean opened=new AtomicBoolean(false);
+   Runnable launch=()->{
+    try{
+     Intent intent=new Intent(Intent.ACTION_SENDTO);
+     intent.setData(Uri.parse("mailto:"+(email==null?"":Uri.encode(email.trim()))));
+     if(subject!=null)intent.putExtra(Intent.EXTRA_SUBJECT,subject);
+     if(body!=null)intent.putExtra(Intent.EXTRA_TEXT,body);
+     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+     startActivity(Intent.createChooser(intent,"Enviar cobrança por e-mail"));
+     opened.set(true);
+    }catch(Exception e){
+     try{
+      Intent fallback=new Intent(Intent.ACTION_SEND);
+      fallback.setType("message/rfc822");
+      if(email!=null)fallback.putExtra(Intent.EXTRA_EMAIL,new String[]{email.trim()});
+      if(subject!=null)fallback.putExtra(Intent.EXTRA_SUBJECT,subject);
+      if(body!=null)fallback.putExtra(Intent.EXTRA_TEXT,body);
+      fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+      startActivity(Intent.createChooser(fallback,"Enviar cobrança por e-mail"));
+      opened.set(true);
+     }catch(Exception ex){opened.set(false);}
+    }
+   };
+   if(Looper.myLooper()==Looper.getMainLooper())launch.run();
+   else runOnUiThread(launch);
+   return true;
+  }
+  @JavascriptInterface public void triggerOverdueCheck(){
+   new Thread(()->{
+    try{
+     ReminderJob.checkNow(MainActivity.this);
+    }catch(Exception ignored){}
+   },"manual-reminder-check").start();
+  }
   @JavascriptInterface public void paymentNotification(String client,String nf){ReminderJob.payment(MainActivity.this,client,nf);}
   @JavascriptInterface public boolean notificationsEnabled(){NotificationManager n=getSystemService(NotificationManager.class);return n.areNotificationsEnabled()&&(Build.VERSION.SDK_INT<33||checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)==PackageManager.PERMISSION_GRANTED);}
   @JavascriptInterface public void requestNotifications(){runOnUiThread(()->{if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},10);else if(!notificationsEnabled())openNotificationSettings();});}
