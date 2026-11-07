@@ -9,7 +9,7 @@
   const FIELDS=Object.freeze([
     {key:'client_name',label:'Nome do cliente',required:true,aliases:['cliente','nome do cliente','razao social','nome cliente','empresa','sacado']},
     {key:'nf_number',label:'Número da nota fiscal',required:true,aliases:['nf','nfe','numero da nf','numero nf','nota fiscal','numero da nota fiscal','numero nota','n nota','numero']},
-    {key:'billing_date',label:'Data do faturamento',required:true,aliases:['data','data da nota','data nf','emissao','data de emissao','data emissao','faturamento','data do faturamento','data de faturamento','data faturamento','data da cobranca','cobranca']},
+    {key:'billing_date',label:'Data do faturamento',required:true,aliases:['data','data da nota','data nf','emissao','data de emissao','data emissao','data do faturamento','data de faturamento','data faturamento','data da cobranca','cobranca']},
     {key:'term_days',label:'Prazo de pagamento',required:false,aliases:['prazo','prazo de pagamento','prazo pagamento','prazo em dias','dias','dias de prazo']},
     {key:'due_date',label:'Data de vencimento',required:false,aliases:['vencimento','data de vencimento','data vencimento','venc','vence em']},
     {key:'amount_cents',label:'Valor da nota fiscal',required:true,aliases:['valor','valor da nota fiscal','valor da nota','valor nf','valor da nf','valor r','valor r$','total','valor total']},
@@ -24,10 +24,10 @@
   const normalizeHeader=value=>normal(value).replace(/[º°ª]/g,'').replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
   function suggestMapping(headers){
     const mapping={},used=new Set();
-    for(let index=0;index<headers.length;index++){
-      const header=headers[index],label=normalizeHeader(typeof header==='object'?header.label:header);
-      const matches=FIELDS.filter(field=>field.aliases.some(alias=>normalizeHeader(alias)===label));
-      if(matches.length===1&&!used.has(matches[0].key)){mapping[matches[0].key]=typeof header==='object'?header.index:index;used.add(matches[0].key);}
+    const headersNorm=headers.map((h,index)=>({index:typeof h==='object'?h.index:index,label:normalizeHeader(typeof h==='object'?h.label:h)}));
+    for(const field of FIELDS){
+      const match=headersNorm.find(h=>!used.has(h.index)&&field.aliases.some(alias=>normalizeHeader(alias)===h.label));
+      if(match){mapping[field.key]=match.index;used.add(match.index);}
     }
     return mapping;
   }
@@ -58,10 +58,16 @@
     let text=String(value==null?'':value).trim();if(!text)return null;
     text=text.replace(/[ T]\d{1,2}:\d{2}(:\d{2})?.*$/i,'');let match;
     if((match=/^(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})$/.exec(text)))return isoDay(Number(match[1]),Number(match[2]),Number(match[3]));
-    if((match=/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(text)))return isoDay(Number(match[3]),Number(match[2]),Number(match[1]));
+    if((match=/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(text))){
+      const n1=Number(match[1]),n2=Number(match[2]),yyyy=Number(match[3]);
+      if(n1>=1&&n1<=12&&n2>12&&n2<=31)return isoDay(yyyy,n1,n2);
+      return isoDay(yyyy,n2,n1);
+    }
     if((match=/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2})$/.exec(text))){
-      const yy=Number(match[3]),yyyy=yy<=50?2000+yy:1900+yy;
-      return isoDay(yyyy,Number(match[2]),Number(match[1]));
+      const n1=Number(match[1]),n2=Number(match[2]),yy=Number(match[3]);
+      const yyyy=yy<=50?2000+yy:1900+yy;
+      if(n1>=1&&n1<=12&&n2>12&&n2<=31)return isoDay(yyyy,n1,n2);
+      return isoDay(yyyy,n2,n1);
     }
     const ts=Date.parse(text);if(!Number.isNaN(ts)){const d=new Date(ts);return isoDay(d.getUTCFullYear(),d.getUTCMonth()+1,d.getUTCDate());}
     return null;
@@ -325,7 +331,13 @@
       const text=key=>cellText(get(key));
       const raw=key=>{const cell=get(key);return cell&&cell.v!==undefined?cell.v:'';};
       for(const field of FIELDS){const cell=get(field.key);if(cell&&(cell.f||cell.t==='e'))errors.push(field.label+': '+(cell.f?'fórmula não permitida. Substitua por um valor fixo.':'célula com erro na planilha.'));}
-      value.client_name=text('client_name');value.nf_number=text('nf_number');value.consultant=text('consultant')||String(defaults.consultant||'').trim();
+      value.client_name=text('client_name');
+      value.nf_number=text('nf_number');
+      if(!value.nf_number){
+        value.nf_number='NF-'+String(row.sourceRow-1).padStart(4,'0');
+        if(!Number.isInteger(mapping.nf_number))warnings.push('Número da NF não informado na planilha. Gerada NF automática '+value.nf_number+'.');
+      }
+      value.consultant=text('consultant')||String(defaults.consultant||'').trim();
       const emailCell=text('consultant_email');
       if(emailCell){
         const cleanEmail=String(emailCell).trim().toLowerCase();
@@ -353,7 +365,15 @@
         else if(termText&&value.term_days!==difference)errors.push('O prazo de pagamento contradiz a data de vencimento.');
         else if(!termText)value.term_days=difference;
       }
-      value.amount_cents=parseAmount(raw('amount_cents'));if(value.amount_cents===null)errors.push('Informe um valor de NF válido, maior que zero.');
+      value.amount_cents=parseAmount(raw('amount_cents'));
+      if(value.amount_cents===null){
+        if(!Number.isInteger(mapping.amount_cents)||!text('amount_cents')){
+          value.amount_cents=0;
+          warnings.push('Valor da nota não informado na planilha. Considerado R$ 0,00.');
+        }else{
+          errors.push('Informe um valor de NF válido.');
+        }
+      }
       const phone=text('consultant_phone');value.consultant_phone=normalizePhone(phone);if(phone&&!value.consultant_phone)warnings.push('Telefone do consultor inválido: informe código do país e DDD. O telefone será ignorado.');
       const fundingRaw=text('funding_source')||defaults.funding_source||'';
       const funding=normalizeHeader(fundingRaw);
