@@ -161,7 +161,8 @@
       if(!/\.(xlsx|xls|csv)$/i.test(file.name))throw new Error('Selecione um arquivo .xlsx, .xls ou .csv.');
       if(file.size>15*1024*1024)throw new Error('A planilha deve ter no máximo 15 MB.');
       if(!window.NFImporter)throw new Error('A leitura de planilhas não está disponível. Reabra o aplicativo.');
-      if(!reparse)sheetImport={file,bytes:null,table:null,preview:null,mapping:{},page:0,loading:true,error:'',sheetIndex:0,headerRow:0};
+      const initialBytes=sheetImport.bytes;
+      if(!reparse)sheetImport={file,bytes:initialBytes,table:null,preview:null,mapping:{},page:0,loading:true,error:'',sheetIndex:0,headerRow:0};
       else{sheetImport.loading=true;sheetImport.error='';sheetImport.preview=null;}
       render();
       let bytes=sheetImport.bytes;

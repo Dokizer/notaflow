@@ -52,9 +52,18 @@
       const date=new Date(timestamp);
       return Number.isNaN(date.getTime())?null:isoDay(date.getUTCFullYear(),date.getUTCMonth()+1,date.getUTCDate());
     }
-    const text=String(value==null?'':value).trim();let match;
-    if((match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(text)))return isoDay(Number(match[1]),Number(match[2]),Number(match[3]));
-    if((match=/^(\d{1,2})([\/.-])(\d{1,2})\2(\d{4})$/.exec(text)))return isoDay(Number(match[4]),Number(match[3]),Number(match[1]));
+    if(value instanceof Date){
+      return Number.isNaN(value.getTime())?null:isoDay(value.getUTCFullYear(),value.getUTCMonth()+1,value.getUTCDate());
+    }
+    let text=String(value==null?'':value).trim();if(!text)return null;
+    text=text.replace(/[ T]\d{1,2}:\d{2}(:\d{2})?.*$/i,'');let match;
+    if((match=/^(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})$/.exec(text)))return isoDay(Number(match[1]),Number(match[2]),Number(match[3]));
+    if((match=/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(text)))return isoDay(Number(match[3]),Number(match[2]),Number(match[1]));
+    if((match=/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2})$/.exec(text))){
+      const yy=Number(match[3]),yyyy=yy<=50?2000+yy:1900+yy;
+      return isoDay(yyyy,Number(match[2]),Number(match[1]));
+    }
+    const ts=Date.parse(text);if(!Number.isNaN(ts)){const d=new Date(ts);return isoDay(d.getUTCFullYear(),d.getUTCMonth()+1,d.getUTCDate());}
     return null;
   }
   function parseAmount(value){
@@ -62,9 +71,11 @@
       const cents=Math.round(value*100);
       return Number.isFinite(value)&&value>0&&Number.isSafeInteger(cents)&&cents<=99999999999&&Math.abs(value*100-cents)<0.00001?cents:null;
     }
-    const text=String(value==null?'':value).trim().replace(/^R\$\s*/i,'');let parts;
+    let text=String(value==null?'':value).trim().replace(/^(R\$\s*|\$\s*)/i,'').trim();if(!text)return null;
+    let parts;
     if(/^\d+(?:,\d{1,2})?$/.test(text)||/^\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?$/.test(text))parts=text.replace(/\./g,'').split(',');
-    else if(/^\d+\.\d{1,2}$/.test(text))parts=text.split('.');else return null;
+    else if(/^\d+(?:\.\d{1,2})?$/.test(text)||/^\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?$/.test(text))parts=text.replace(/,/g,'').split('.');
+    else return null;
     const cents=Number(parts[0])*100+Number((parts[1]||'').padEnd(2,'0'));
     return Number.isSafeInteger(cents)&&cents>0&&cents<=99999999999?cents:null;
   }
@@ -215,7 +226,9 @@
     while(records.length&&records[records.length-1].every(cell=>!cellText(cell)))records.pop();
     if(!records.length||headerRow>=records.length)throw new Error('A planilha não contém uma linha de cabeçalho disponível.');
     if(records.length-headerRow-1>LIMITS.maxRows)throw new Error('A planilha excede o limite de 5000 linhas.');
-    const columns=Math.max(...records.map(row=>row.length));
+    let columns=Math.max(...records.map(row=>row.length));
+    while(columns>0&&records.every(row=>!cellText(row[columns-1])))columns--;
+    if(!columns)throw new Error('A planilha não contém colunas com dados.');
     if(columns>LIMITS.maxColumns)throw new Error('A planilha excede o limite de 128 colunas.');
     const header=records[headerRow];if(header.some(cell=>cell&&cell.f))throw new Error('O cabeçalho contém fórmula. Substitua a fórmula por texto.');
     const rows=records.slice(headerRow+1).map((cells,index)=>({sourceRow:headerRow+index+2,cells}));
@@ -255,18 +268,33 @@
     try{workbook=X.read(bytes,{...common,sheets:sheetIndex,sheetRows:LIMITS.maxRows+headerRow+2});}catch(_){throw new Error('Não foi possível ler a aba do Excel. Verifique o arquivo e remova senhas ou fórmulas inválidas.');}
     const sheet=workbook.Sheets[names[sheetIndex]];
     if(!sheet)throw new Error('A aba selecionada está vazia.');
-    let range={s:{r:0,c:0},e:{r:0,c:0}};
-    for(const key of ['!ref','!fullref'])if(sheet[key]){
-      const parsed=X.utils.decode_range(sheet[key]);
-      if(parsed.e.r>LIMITS.maxRows+headerRow||parsed.e.c>=LIMITS.maxColumns)throw new Error('A aba excede o limite de 5000 linhas ou 128 colunas. Remova as linhas e colunas excedentes.');
-      range.e.r=Math.max(range.e.r,parsed.e.r);range.e.c=Math.max(range.e.c,parsed.e.c);
+    let maxR=0,maxC=0,foundContent=false;
+    for(const key of Object.keys(sheet)){
+      if(key[0]!=='!'){
+        const address=X.utils.decode_cell(key);
+        const cell=sheet[key];
+        const hasValue=cell&&(cell.v!==undefined&&cell.v!==null&&String(cell.v).trim()!==''||cell.f);
+        if(hasValue){
+          foundContent=true;
+          maxR=Math.max(maxR,address.r);
+          maxC=Math.max(maxC,address.c);
+        }
+      }
     }
-    for(const key of Object.keys(sheet))if(key[0]!=='!'){
-      const address=X.utils.decode_cell(key);
-      if(address.r>LIMITS.maxRows+headerRow||address.c>=LIMITS.maxColumns)throw new Error('A aba excede o limite de 5000 linhas ou 128 colunas.');
-      range.e.r=Math.max(range.e.r,address.r);range.e.c=Math.max(range.e.c,address.c);
+    for(const refKey of ['!ref','!fullref']){
+      if(sheet[refKey]){
+        try{
+          const parsed=X.utils.decode_range(sheet[refKey]);
+          const refR=Math.min(parsed.e.r,LIMITS.maxRows+headerRow+5);
+          const refC=Math.min(parsed.e.c,LIMITS.maxColumns-1);
+          maxR=Math.max(maxR,refR);
+          maxC=Math.max(maxC,refC);
+        }catch(_){}
+      }
     }
-    const records=Array.from({length:range.e.r+1},(_,row)=>Array.from({length:range.e.c+1},(_,column)=>{
+    maxR=Math.min(maxR,LIMITS.maxRows+headerRow+5);
+    maxC=Math.min(maxC,LIMITS.maxColumns-1);
+    const records=Array.from({length:maxR+1},(_,row)=>Array.from({length:maxC+1},(_,column)=>{
       const cell=sheet[X.utils.encode_cell({r:row,c:column})];if(!cell)return {v:'',t:'s',w:''};
       return {v:cell.v,t:cell.t,w:cell.w,z:cell.z,f:cell.f};
     }));
