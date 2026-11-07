@@ -48,12 +48,91 @@ public final class MainActivity extends Activity {
   ReminderJob.schedule(this);web.loadUrl(ORIGIN);
  }
  private ValueCallback<Uri[]> fileCallback;
+ private void launchNativeSpreadsheetPicker(){
+  runOnUiThread(()->{
+   try{
+    Intent i=new Intent(Intent.ACTION_GET_CONTENT);
+    i.addCategory(Intent.CATEGORY_OPENABLE);
+    i.setType("*/*");
+    String[] mimes=new String[]{"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","application/vnd.ms-excel","text/csv","text/comma-separated-values","application/csv","text/plain","application/octet-stream"};
+    i.putExtra(Intent.EXTRA_MIME_TYPES,mimes);
+    startActivityForResult(Intent.createChooser(i,"Selecionar Planilha"),88);
+   }catch(Exception e){
+    try{
+     Intent fallback=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+     fallback.addCategory(Intent.CATEGORY_OPENABLE);
+     fallback.setType("*/*");
+     startActivityForResult(fallback,88);
+    }catch(Exception ex){
+     web.evaluateJavascript("if(window.onNativeSpreadsheetError) window.onNativeSpreadsheetError('Não foi possível abrir o seletor de arquivos.');",null);
+    }
+   }
+  });
+ }
+ private void readSpreadsheetUriAsync(Uri uri){
+  new Thread(()->{
+   try{
+    String name="planilha.xlsx";
+    try(android.database.Cursor cursor=getContentResolver().query(uri,null,null,null,null)){
+     if(cursor!=null&&cursor.moveToFirst()){
+      int idx=cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+      if(idx>=0){String n=cursor.getString(idx);if(n!=null&&!n.trim().isEmpty())name=n;}
+     }
+    }catch(Exception ignored){}
+    ByteArrayOutputStream baos=new ByteArrayOutputStream();
+    try(InputStream in=getContentResolver().openInputStream(uri)){
+     if(in==null)throw new IOException("Não foi possível acessar os dados da planilha.");
+     byte[] buf=new byte[16384];int r;
+     while((r=in.read(buf))!=-1){
+      baos.write(buf,0,r);
+      if(baos.size()>15*1024*1024)throw new IOException("A planilha excede o limite de 15 MB.");
+     }
+    }
+    byte[] data=baos.toByteArray();
+    String base64=android.util.Base64.encodeToString(data,android.util.Base64.NO_WRAP);
+    final String cleanName=name.replace("\\","\\\\").replace("'","\\'");
+    runOnUiThread(()->{
+     web.evaluateJavascript("if(window.onNativeSpreadsheetLoaded) window.onNativeSpreadsheetLoaded('"+cleanName+"','"+base64+"');",null);
+    });
+   }catch(Exception err){
+    final String msg=(err.getMessage()!=null?err.getMessage():"Erro ao ler os dados da planilha.").replace("\\","\\\\").replace("'","\\'");
+    runOnUiThread(()->{
+     web.evaluateJavascript("if(window.onNativeSpreadsheetError) window.onNativeSpreadsheetError('"+msg+"');",null);
+    });
+   }
+  },"native-sheet-reader").start();
+ }
  @Override protected void onStart(){super.onStart();active=true;}
  @Override protected void onStop(){active=false;super.onStop();}
- @Override protected void onActivityResult(int req,int result,Intent data){super.onActivityResult(req,result,data);if(req==42&&fileCallback!=null){Uri[] uris=null;if(result==RESULT_OK&&data!=null){if(data.getData()!=null)uris=new Uri[]{data.getData()};else if(data.getClipData()!=null&&data.getClipData().getItemCount()>0)uris=new Uri[]{data.getClipData().getItemAt(0).getUri()};}fileCallback.onReceiveValue(uris);fileCallback=null;}}
+ @Override protected void onActivityResult(int req,int result,Intent data){
+  super.onActivityResult(req,result,data);
+  if(req==88){
+   if(result==RESULT_OK&&data!=null){
+    Uri uri=data.getData();
+    if(uri==null&&data.getClipData()!=null&&data.getClipData().getItemCount()>0){
+     uri=data.getClipData().getItemAt(0).getUri();
+    }
+    if(uri!=null){
+     readSpreadsheetUriAsync(uri);
+     return;
+    }
+   }
+   web.evaluateJavascript("if(window.onNativeSpreadsheetCancel) window.onNativeSpreadsheetCancel();",null);
+   return;
+  }
+  if(req==42&&fileCallback!=null){
+   Uri[] uris=null;
+   if(result==RESULT_OK&&data!=null){
+    if(data.getData()!=null)uris=new Uri[]{data.getData()};
+    else if(data.getClipData()!=null&&data.getClipData().getItemCount()>0)uris=new Uri[]{data.getClipData().getItemAt(0).getUri()};
+   }
+   fileCallback.onReceiveValue(uris);fileCallback=null;
+  }
+ }
  @Override protected void onResume(){super.onResume();if(web!=null)web.evaluateJavascript("window.dispatchEvent(new Event('native-resume'))",null);}
  @Override public void onBackPressed(){web.evaluateJavascript("(function(){if(typeof window.NFBack==='function')return window.NFBack();return false;})()",v->{if(!"true".equals(v))new AlertDialog.Builder(this).setMessage("Fechar o NotaFlow?").setPositiveButton("Fechar",(d,w)->finish()).setNegativeButton("Continuar",null).show();});}
  public final class Bridge {
+  @JavascriptInterface public void pickSpreadsheet(){launchNativeSpreadsheetPicker();}
   @JavascriptInterface public String readState(){return SecureStore.get(MainActivity.this,"state","{}");}
   @JavascriptInterface public void writeState(String json){if(json==null||json.length()>12000000)throw new IllegalArgumentException("Dados muito grandes.");try{new JSONObject(json);}catch(JSONException e){throw new IllegalArgumentException("Dados inválidos.");}SecureStore.put(MainActivity.this,"state",json);}
   @JavascriptInterface public void cacheContext(String json){if(json==null||json.length()>12000000)throw new IllegalArgumentException("Contexto muito grande.");try{ReminderJob.cacheContext(MainActivity.this,new JSONObject(json));}catch(JSONException e){throw new IllegalArgumentException("Contexto inválido.");}}

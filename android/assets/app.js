@@ -123,7 +123,30 @@
     return html;
   }
   function cancelImport(message) { importSequence++;if(importJob)importJob.terminate();importJob=null;clearTimeout(importTimer);importTimer=null;sheetImport.loading=false;if(message)sheetImport.error=message; }
-  function refreshImportPreview() { if(!sheetImport.table)return;try{sheetImport.preview=window.NFImporter.preview(sheetImport.table,{mapping:sheetImport.mapping,defaultTerm:state.settings.defaultTerm,existingInvoices:state.invoices});sheetImport.error='';sheetImport.page=0;}catch(error){sheetImport.preview=null;sheetImport.error=errorMessage(error);}if(tab==='spreadsheet')render(); }
+  window.onNativeSpreadsheetLoaded=function(filename,base64){
+    try{
+      const binary=atob(base64);
+      const len=binary.length;
+      const bytes=new Uint8Array(len);
+      for(let i=0;i<len;i++)bytes[i]=binary.charCodeAt(i);
+      const fakeFile={name:filename,size:bytes.length,arrayBuffer:async()=>bytes.buffer};
+      sheetImport.bytes=bytes;
+      readSpreadsheet(fakeFile);
+    }catch(err){
+      sheetImport.error='Erro ao processar dados da planilha: '+(err&&err.message?err.message:err);
+      sheetImport.loading=false;
+      render();
+    }
+  };
+  window.onNativeSpreadsheetError=function(errMsg){
+    if(errMsg)sheetImport.error=errMsg;
+    sheetImport.loading=false;
+    render();
+  };
+  window.onNativeSpreadsheetCancel=function(){
+    sheetImport.loading=false;
+    render();
+  };
   async function parseSpreadsheetLocally(bytes,file,sheetIndex,headerRow){
     if(/\.xlsx$/i.test(file.name)&&window.NFImporter.validateArchive){
       try{await window.NFImporter.validateArchive(bytes);}catch(_){}
@@ -461,7 +484,14 @@
     else if(name==='new-consultant')openConsultant();else if(name==='edit-consultant')openConsultant(id);
     else if(name==='commit-import')await commitImport();
     else if(name==='spreadsheet'){tab='spreadsheet';render();window.scrollTo(0,0);}
-    else if(name==='choose-spreadsheet'){const inp=$('spreadsheet-file');if(inp){inp.value='';inp.click();}}
+    else if(name==='choose-spreadsheet'){
+      if(window.Native&&window.Native.pickSpreadsheet){
+        sheetImport.loading=true;sheetImport.error='';render();
+        window.Native.pickSpreadsheet();
+      }else{
+        const inp=$('spreadsheet-file');if(inp){inp.value='';inp.click();}
+      }
+    }
     else if(name==='cancel-import'){cancelImport('Leitura cancelada.');sheetImport.table=null;sheetImport.preview=null;render();}
     else if(name==='import-prev'||name==='import-next'){sheetImport.page+=name==='import-prev'?-1:1;render();}
     else if(name==='export-csv')exportCsv();else if(name==='export-backup')exportBackup();else if(name==='import')$('import-file').click();
