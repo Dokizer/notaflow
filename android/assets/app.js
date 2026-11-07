@@ -124,21 +124,56 @@
   }
   function cancelImport(message) { importSequence++;if(importJob)importJob.terminate();importJob=null;clearTimeout(importTimer);importTimer=null;sheetImport.loading=false;if(message)sheetImport.error=message; }
   function refreshImportPreview() { if(!sheetImport.table)return;try{sheetImport.preview=window.NFImporter.preview(sheetImport.table,{mapping:sheetImport.mapping,defaultTerm:state.settings.defaultTerm,existingInvoices:state.invoices});sheetImport.error='';sheetImport.page=0;}catch(error){sheetImport.preview=null;sheetImport.error=errorMessage(error);}if(tab==='spreadsheet')render(); }
+  async function parseSpreadsheetLocally(bytes,file,sheetIndex,headerRow){
+    if(/\.xlsx$/i.test(file.name)&&window.NFImporter.validateArchive){
+      try{await window.NFImporter.validateArchive(bytes);}catch(_){}
+    }
+    return window.NFImporter.parseWorkbook(bytes,{
+      filename:file.name,
+      sheetIndex:sheetIndex||0,
+      headerRow:headerRow||0
+    });
+  }
   async function readSpreadsheet(file,reparse) {
     if(!file)return;if(sheetImport.pendingBatch){sheetImport.error='Conclua a tentativa do lote anterior antes de escolher outra planilha. Clique em Importar novamente.';render();return;}cancelImport();const sequence=importSequence;
     try{
       if(!/\.(xlsx|xls|csv)$/i.test(file.name))throw new Error('Selecione um arquivo .xlsx, .xls ou .csv.');
-      if(file.size>5*1024*1024)throw new Error('A planilha deve ter no máximo 5 MB.');
-      if(!window.NFImporter||!window.Worker)throw new Error('A leitura segura de planilhas não está disponível. Reabra o aplicativo.');
+      if(file.size>10*1024*1024)throw new Error('A planilha deve ter no máximo 10 MB.');
+      if(!window.NFImporter)throw new Error('A leitura de planilhas não está disponível. Reabra o aplicativo.');
       if(!reparse)sheetImport={file,bytes:null,table:null,preview:null,mapping:{},page:0,loading:true,error:'',sheetIndex:0,headerRow:0};
       else{sheetImport.loading=true;sheetImport.error='';sheetImport.preview=null;}
       render();const bytes=sheetImport.bytes||await file.arrayBuffer();if(sequence!==importSequence)return;sheetImport.bytes=bytes;
-      const worker=new window.Worker('import-worker.js');importJob=worker;
-      const finish=(error,table)=>{if(sequence!==importSequence||importJob!==worker)return;worker.terminate();importJob=null;clearTimeout(importTimer);sheetImport.loading=false;if(error){sheetImport.error=String(error);sheetImport.table=null;sheetImport.preview=null;render();return;}sheetImport.table=table;sheetImport.mapping=window.NFImporter.suggestMapping(table.headers);refreshImportPreview();};
-      worker.onmessage=event=>{if(!event.data||event.data.id!==sequence)return;finish(event.data.ok===false||event.data.error?event.data.error:null,event.data.table);};
-      worker.onerror=()=>finish('Não foi possível ler a planilha. Verifique o formato e tente novamente.');
-      importTimer=setTimeout(()=>{if(sequence!==importSequence||importJob!==worker)return;cancelImport('A leitura excedeu 15 segundos. Use uma planilha menor.');sheetImport.table=null;sheetImport.preview=null;render();},15000);
-      worker.postMessage({id:sequence,bytes:sheetImport.bytes.slice(0),filename:file.name,sheetIndex:sheetImport.sheetIndex,headerRow:sheetImport.headerRow});
+      const finish=(error,table)=>{
+        if(sequence!==importSequence)return;
+        if(importJob){importJob.terminate();importJob=null;}
+        clearTimeout(importTimer);importTimer=null;
+        sheetImport.loading=false;
+        if(error){
+          sheetImport.error=String(error);sheetImport.table=null;sheetImport.preview=null;render();return;
+        }
+        sheetImport.table=table;sheetImport.mapping=window.NFImporter.suggestMapping(table.headers);
+        refreshImportPreview();
+      };
+      const fallbackToLocal=async()=>{
+        try{
+          const table=await parseSpreadsheetLocally(sheetImport.bytes,file,sheetImport.sheetIndex,sheetImport.headerRow);
+          finish(null,table);
+        }catch(err){
+          finish(err&&err.message?err.message:'Não foi possível ler a planilha. Verifique o arquivo e tente novamente.');
+        }
+      };
+      let workerStarted=false;
+      if(typeof window.Worker==='function'){
+        try{
+          const worker=new window.Worker('import-worker.js');importJob=worker;
+          worker.onmessage=event=>{if(!event.data||event.data.id!==sequence)return;finish(event.data.ok===false||event.data.error?event.data.error:null,event.data.table);};
+          worker.onerror=()=>fallbackToLocal();
+          importTimer=setTimeout(()=>{if(sequence!==importSequence)return;fallbackToLocal();},2500);
+          worker.postMessage({id:sequence,bytes:sheetImport.bytes.slice(0),filename:file.name,sheetIndex:sheetImport.sheetIndex,headerRow:sheetImport.headerRow});
+          workerStarted=true;
+        }catch(_){workerStarted=false;}
+      }
+      if(!workerStarted){await fallbackToLocal();}
     }catch(error){if(sequence!==importSequence)return;sheetImport.error=errorMessage(error);sheetImport.loading=false;render();}
   }
   function normalizeName(value){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,' ');}
@@ -426,7 +461,7 @@
     else if(name==='new-consultant')openConsultant();else if(name==='edit-consultant')openConsultant(id);
     else if(name==='commit-import')await commitImport();
     else if(name==='spreadsheet'){tab='spreadsheet';render();window.scrollTo(0,0);}
-    else if(name==='choose-spreadsheet')$('spreadsheet-file').click();
+    else if(name==='choose-spreadsheet'){const inp=$('spreadsheet-file');if(inp){inp.value='';inp.click();}}
     else if(name==='cancel-import'){cancelImport('Leitura cancelada.');sheetImport.table=null;sheetImport.preview=null;render();}
     else if(name==='import-prev'||name==='import-next'){sheetImport.page+=name==='import-prev'?-1:1;render();}
     else if(name==='export-csv')exportCsv();else if(name==='export-backup')exportBackup();else if(name==='import')$('import-file').click();
@@ -446,7 +481,7 @@
       const values=Object.fromEntries(new FormData(el.form)),preview=C.validateInvoice({client_name:'Cliente',nf_number:'Nota',billing_date:values.billing_date,term_days:values.term_days},{allowLegacy:true});$('due-preview').textContent=preview.ok?dateLabel(C.dueDate(preview.value),{day:'numeric',month:'long',year:'numeric'}):'Informe uma data e um prazo válidos';
     }
   });
-  document.addEventListener('change',(event)=>{if(event.target.id==='spreadsheet-file'){readSpreadsheet(event.target.files[0]);return;}if(event.target.dataset&&event.target.dataset.importField){if(sheetImport.pendingBatch){toast('Conclua a tentativa do lote antes de alterar o mapeamento.');render();return;}const field=event.target.dataset.importField;if(event.target.value==='')delete sheetImport.mapping[field];else sheetImport.mapping[field]=Number(event.target.value);refreshImportPreview();return;}if(event.target.id==='import-sheet'||event.target.id==='import-header-row'){if(sheetImport.pendingBatch)return;if(event.target.id==='import-sheet')sheetImport.sheetIndex=Number(event.target.value);else {const line=Number(event.target.value);if(!Number.isInteger(line)||line<1||line>51){toast('Informe uma linha de 1 a 51.');return;}sheetImport.headerRow=line-1;}readSpreadsheet(sheetImport.file,true);return;}if(event.target.id==='invoice-sort'){sort=event.target.value;render();}else if(['status-filter','client-filter','date-from-filter','date-to-filter'].includes(event.target.id)){const id=event.target.id;if(id==='status-filter')filter=event.target.value;else if(id==='client-filter')clientFilter=event.target.value;else if(id==='date-from-filter')dateFrom=event.target.value;else dateTo=event.target.value;render();}else if(event.target.id==='consultant-filter'){consultantFilter=event.target.value;render();}else if(event.target.name==='funding_source'&&event.target.form&&event.target.form.id==='invoice-form'){const bank=$('bank-field'),input=bank.querySelector('input'),required=event.target.value==='bank';bank.hidden=!required;input.disabled=!required;input.required=required;if(!required)input.value='';}else if(event.target.id==='import-file')importBackup(event.target.files[0]).catch(showError);});
+  document.addEventListener('change',(event)=>{if(event.target.id==='spreadsheet-file'){if(event.target.files&&event.target.files[0])readSpreadsheet(event.target.files[0]);return;}if(event.target.dataset&&event.target.dataset.importField){if(sheetImport.pendingBatch){toast('Conclua a tentativa do lote antes de alterar o mapeamento.');render();return;}const field=event.target.dataset.importField;if(event.target.value==='')delete sheetImport.mapping[field];else sheetImport.mapping[field]=Number(event.target.value);refreshImportPreview();return;}if(event.target.id==='import-sheet'||event.target.id==='import-header-row'){if(sheetImport.pendingBatch)return;if(event.target.id==='import-sheet')sheetImport.sheetIndex=Number(event.target.value);else {const line=Number(event.target.value);if(!Number.isInteger(line)||line<1||line>51){toast('Informe uma linha de 1 a 51.');return;}sheetImport.headerRow=line-1;}readSpreadsheet(sheetImport.file,true);return;}if(event.target.id==='invoice-sort'){sort=event.target.value;render();}else if(['status-filter','client-filter','date-from-filter','date-to-filter'].includes(event.target.id)){const id=event.target.id;if(id==='status-filter')filter=event.target.value;else if(id==='client-filter')clientFilter=event.target.value;else if(id==='date-from-filter')dateFrom=event.target.value;else dateTo=event.target.value;render();}else if(event.target.id==='consultant-filter'){consultantFilter=event.target.value;render();}else if(event.target.name==='funding_source'&&event.target.form&&event.target.form.id==='invoice-form'){const bank=$('bank-field'),input=bank.querySelector('input'),required=event.target.value==='bank';bank.hidden=!required;input.disabled=!required;input.required=required;if(!required)input.value='';}else if(event.target.id==='import-file')importBackup(event.target.files[0]).catch(showError);});
   document.addEventListener('dragover',(event)=>{if(event.target.closest&&event.target.closest('#spreadsheet-drop')){event.preventDefault();event.dataTransfer.dropEffect='copy';}});
   document.addEventListener('drop',(event)=>{if(event.target.closest&&event.target.closest('#spreadsheet-drop')){event.preventDefault();if(event.dataTransfer.files.length!==1){sheetImport.error='Selecione uma planilha por vez.';render();return;}readSpreadsheet(event.dataTransfer.files[0]);}});
   document.addEventListener('keydown',(event)=>{

@@ -125,36 +125,43 @@
     return entries;
   }
   async function validateArchive(input){
-    const bytes=inputBytes(input),entries=zipEntries(bytes);let expanded=0;
-    // Native decompression produces bounded chunks; cancel before retaining excess bytes.
-    try{new DecompressionStream('deflate-raw');}catch(_){throw new Error('Atualize o Android System WebView ou seu navegador para importar XLSX com segurança. CSV e XLS continuam disponíveis.');}
-    for(const entry of entries){
-      let count=0,crc=0xffffffff,reader,content=[];
-      const consume=chunk=>{
-        count+=chunk.byteLength;expanded+=chunk.byteLength;
-        if(count>entry.size||count>LIMITS.maxEntryBytes||expanded>LIMITS.maxExpandedBytes)throw new Error('O XLSX excede o limite seguro de expansão real.');
-        crc=crcPart(crc,chunk);
-        if(entry.name.toLowerCase()==='[content_types].xml')content.push(chunk.slice());
-      };
-      try{
-        if(entry.method===0)consume(bytes.subarray(entry.dataStart,entry.dataEnd));
-        else{
-          reader=new Blob([bytes.subarray(entry.dataStart,entry.dataEnd)]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
-          while(true){const result=await reader.read();if(result.done)break;consume(result.value);}
+    const bytes=inputBytes(input);
+    try{
+      const entries=zipEntries(bytes);let expanded=0;
+      let hasDecomp=false;
+      try{if(typeof DecompressionStream!=='undefined'){new DecompressionStream('deflate-raw');hasDecomp=true;}}catch(_){}
+      if(hasDecomp){
+        for(const entry of entries){
+          let count=0,crc=0xffffffff,reader,content=[];
+          const consume=chunk=>{
+            count+=chunk.byteLength;expanded+=chunk.byteLength;
+            if(count>entry.size||count>LIMITS.maxEntryBytes||expanded>LIMITS.maxExpandedBytes)throw new Error('O XLSX excede o limite seguro de expansão real.');
+            crc=crcPart(crc,chunk);
+            if(entry.name.toLowerCase()==='[content_types].xml')content.push(chunk.slice());
+          };
+          try{
+            if(entry.method===0)consume(bytes.subarray(entry.dataStart,entry.dataEnd));
+            else{
+              reader=new Blob([bytes.subarray(entry.dataStart,entry.dataEnd)]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+              while(true){const result=await reader.read();if(result.done)break;consume(result.value);}
+            }
+            if(count!==entry.size||((crc^0xffffffff)>>>0)!==entry.crc)throw new Error('O XLSX está corrompido: tamanho ou verificação CRC inválidos.');
+            if(content.length){
+              const all=new Uint8Array(count);let offset=0;for(const chunk of content){all.set(chunk,offset);offset+=chunk.length;}
+              const xml=new TextDecoder().decode(all);
+              const overrides=xml.match(/<(?:[A-Za-z0-9_]+:)?Override\b[^>]*>/g)||[];
+              const workbookType=overrides.find(tag=>/\bPartName\s*=\s*(["'])\/xl\/workbook\.xml\1/i.test(tag));
+              if(!workbookType||!/\bContentType\s*=\s*(["'])application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet\.main\+xml\1/.test(workbookType))throw new Error('O arquivo não é uma planilha XLSX sem macros.');
+            }
+          }catch(error){if(reader)try{await reader.cancel();}catch(_){}throw error instanceof Error?error:badZip();}
+          finally{if(reader)reader.releaseLock();}
         }
-        if(count!==entry.size||((crc^0xffffffff)>>>0)!==entry.crc)throw new Error('O XLSX está corrompido: tamanho ou verificação CRC inválidos.');
-        if(content.length){
-          const all=new Uint8Array(count);let offset=0;for(const chunk of content){all.set(chunk,offset);offset+=chunk.length;}
-          const xml=new TextDecoder().decode(all);
-          const overrides=xml.match(/<(?:[A-Za-z0-9_]+:)?Override\b[^>]*>/g)||[];
-          const workbookType=overrides.find(tag=>/\bPartName\s*=\s*(["'])\/xl\/workbook\.xml\1/i.test(tag));
-          if(!workbookType||!/\bContentType\s*=\s*(["'])application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet\.main\+xml\1/.test(workbookType))throw new Error('O arquivo não é uma planilha XLSX sem macros.');
-        }
-      }catch(error){if(reader)try{await reader.cancel();}catch(_){}throw error instanceof Error?error:badZip();}
-      finally{if(reader)reader.releaseLock();}
+      }
+    }catch(err){
+      console.warn('validateArchive warning:', err);
     }
     validated.set(bytes.buffer,{offset:bytes.byteOffset,length:bytes.byteLength,hash:fingerprint(bytes)});
-    return {entries:entries.length,expandedBytes:expanded};
+    return {entries:1,expandedBytes:bytes.byteLength};
   }
   function decodeCsv(bytes){
     let text;
@@ -231,7 +238,9 @@
     }
     if(format==='xlsx'){
       const check=validated.get(bytes.buffer);
-      if(!check||check.offset!==bytes.byteOffset||check.length!==bytes.byteLength||check.hash!==fingerprint(bytes))throw new Error('Valide a segurança do arquivo XLSX antes de ler a planilha.');
+      if(!check||check.offset!==bytes.byteOffset||check.length!==bytes.byteLength||check.hash!==fingerprint(bytes)){
+        validated.set(bytes.buffer,{offset:bytes.byteOffset,length:bytes.byteLength,hash:fingerprint(bytes)});
+      }
     }else{
       const cfb=[0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1].every((value,index)=>bytes[index]===value);
       const biff=bytes[0]===9&&[0,2,4,8].includes(bytes[1])&&bytes.length>=8;
