@@ -123,6 +123,7 @@
     return html;
   }
   function cancelImport(message) { importSequence++;if(importJob)importJob.terminate();importJob=null;clearTimeout(importTimer);importTimer=null;sheetImport.loading=false;if(message)sheetImport.error=message; }
+  function refreshImportPreview() { if(!sheetImport.table)return;try{sheetImport.preview=window.NFImporter.preview(sheetImport.table,{mapping:sheetImport.mapping,defaultTerm:state.settings.defaultTerm,existingInvoices:state.invoices});sheetImport.error='';sheetImport.page=0;}catch(error){sheetImport.preview=null;sheetImport.error=errorMessage(error);}if(tab==='spreadsheet')render(); }
   window.onNativeSpreadsheetLoaded=function(filename,base64){
     try{
       const binary=atob(base64);
