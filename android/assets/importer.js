@@ -20,7 +20,7 @@
     {key:'bank_name',label:'Nome do banco',required:false,aliases:['banco','nome do banco','instituicao financeira']}
   ].map(field=>Object.freeze({...field,aliases:Object.freeze(field.aliases)})));
   const validated=new WeakMap();
-  const normal=value=>String(value==null?'':value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,' ');
+  const normal=value=>String(value==null?'':value).replace(/^(?:\\xef\\xbb\\xbf|\\ufeff|[\ufeff\ufffe])+/i,'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,' ');
   const normalizeHeader=value=>normal(value).replace(/[º°ª]/g,'').replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
   function suggestMapping(headers){
     const mapping={},used=new Set();
@@ -186,7 +186,7 @@
     else if(bytes[0]===0xfe&&bytes[1]===0xff)text=new TextDecoder('utf-16be',{fatal:true}).decode(bytes);
     else{try{text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch(_){text=new TextDecoder('windows-1252',{fatal:true}).decode(bytes);}}
     if(/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(text))throw new Error('O CSV contém dados binários ou caracteres de controle inválidos.');
-    return text.replace(/^\ufeff/,'');
+    return text.replace(/^(?:\\xef\\xbb\\xbf|\\ufeff|[\ufeff\ufffe])+/i,'');
   }
   function inferDelimiter(text){
     const choices=[';',',','\t','|'],counts=choices.map(()=>[]);let quoted=false,row=choices.map(()=>0),records=0;
