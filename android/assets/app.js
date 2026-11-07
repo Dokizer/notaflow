@@ -147,10 +147,7 @@
     sheetImport.loading=false;
     render();
   };
-  async function parseSpreadsheetLocally(bytes,file,sheetIndex,headerRow){
-    if(/\.xlsx$/i.test(file.name)&&window.NFImporter.validateArchive){
-      try{await window.NFImporter.validateArchive(bytes);}catch(_){}
-    }
+  function parseSpreadsheetDirectly(bytes,file,sheetIndex,headerRow){
     return window.NFImporter.parseWorkbook(bytes,{
       filename:file.name,
       sheetIndex:sheetIndex||0,
@@ -161,42 +158,35 @@
     if(!file)return;if(sheetImport.pendingBatch){sheetImport.error='Conclua a tentativa do lote anterior antes de escolher outra planilha. Clique em Importar novamente.';render();return;}cancelImport();const sequence=importSequence;
     try{
       if(!/\.(xlsx|xls|csv)$/i.test(file.name))throw new Error('Selecione um arquivo .xlsx, .xls ou .csv.');
-      if(file.size>10*1024*1024)throw new Error('A planilha deve ter no máximo 10 MB.');
+      if(file.size>15*1024*1024)throw new Error('A planilha deve ter no máximo 15 MB.');
       if(!window.NFImporter)throw new Error('A leitura de planilhas não está disponível. Reabra o aplicativo.');
       if(!reparse)sheetImport={file,bytes:null,table:null,preview:null,mapping:{},page:0,loading:true,error:'',sheetIndex:0,headerRow:0};
       else{sheetImport.loading=true;sheetImport.error='';sheetImport.preview=null;}
-      render();const bytes=sheetImport.bytes||await file.arrayBuffer();if(sequence!==importSequence)return;sheetImport.bytes=bytes;
-      const finish=(error,table)=>{
-        if(sequence!==importSequence)return;
-        if(importJob){importJob.terminate();importJob=null;}
-        clearTimeout(importTimer);importTimer=null;
-        sheetImport.loading=false;
-        if(error){
-          sheetImport.error=String(error);sheetImport.table=null;sheetImport.preview=null;render();return;
-        }
-        sheetImport.table=table;sheetImport.mapping=window.NFImporter.suggestMapping(table.headers);
-        refreshImportPreview();
-      };
-      const fallbackToLocal=async()=>{
-        try{
-          const table=await parseSpreadsheetLocally(sheetImport.bytes,file,sheetImport.sheetIndex,sheetImport.headerRow);
-          finish(null,table);
-        }catch(err){
-          finish(err&&err.message?err.message:'Não foi possível ler a planilha. Verifique o arquivo e tente novamente.');
-        }
-      };
-      let workerStarted=false;
-      if(typeof window.Worker==='function'){
-        try{
-          const worker=new window.Worker('import-worker.js');importJob=worker;
-          worker.onmessage=event=>{if(!event.data||event.data.id!==sequence)return;finish(event.data.ok===false||event.data.error?event.data.error:null,event.data.table);};
-          worker.onerror=()=>fallbackToLocal();
-          importTimer=setTimeout(()=>{if(sequence!==importSequence)return;fallbackToLocal();},2500);
-          worker.postMessage({id:sequence,bytes:sheetImport.bytes.slice(0),filename:file.name,sheetIndex:sheetImport.sheetIndex,headerRow:sheetImport.headerRow});
-          workerStarted=true;
-        }catch(_){workerStarted=false;}
+      render();
+      let bytes=sheetImport.bytes;
+      if(!bytes){
+        if(typeof file.arrayBuffer==='function')bytes=await file.arrayBuffer();
+        else if(file instanceof Uint8Array)bytes=file;
       }
-      if(!workerStarted){await fallbackToLocal();}
+      if(sequence!==importSequence)return;
+      if(!bytes||!bytes.byteLength)throw new Error('O arquivo selecionado está vazio ou não pôde ser lido.');
+      sheetImport.bytes=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
+      setTimeout(()=>{
+        if(sequence!==importSequence)return;
+        try{
+          const table=parseSpreadsheetDirectly(sheetImport.bytes,file,sheetImport.sheetIndex,sheetImport.headerRow);
+          sheetImport.loading=false;
+          sheetImport.table=table;
+          sheetImport.mapping=window.NFImporter.suggestMapping(table.headers);
+          refreshImportPreview();
+        }catch(err){
+          sheetImport.loading=false;
+          sheetImport.error=err&&err.message?err.message:'Não foi possível ler a planilha. Verifique se o arquivo está íntegro e sem senha.';
+          sheetImport.table=null;
+          sheetImport.preview=null;
+          render();
+        }
+      },40);
     }catch(error){if(sequence!==importSequence)return;sheetImport.error=errorMessage(error);sheetImport.loading=false;render();}
   }
   function normalizeName(value){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,' ');}

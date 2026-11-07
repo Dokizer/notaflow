@@ -9,14 +9,14 @@
   const FIELDS=Object.freeze([
     {key:'client_name',label:'Nome do cliente',required:true,aliases:['cliente','nome do cliente','razao social','nome cliente','empresa','sacado']},
     {key:'nf_number',label:'Número da nota fiscal',required:true,aliases:['nf','nfe','numero da nf','numero nf','nota fiscal','numero da nota fiscal','numero nota','n nota','numero']},
-    {key:'billing_date',label:'Data do faturamento',required:true,aliases:['emissao','data de emissao','data emissao','faturamento','data do faturamento','data de faturamento','data faturamento','data da cobranca','cobranca']},
+    {key:'billing_date',label:'Data do faturamento',required:true,aliases:['data','data da nota','data nf','emissao','data de emissao','data emissao','faturamento','data do faturamento','data de faturamento','data faturamento','data da cobranca','cobranca']},
     {key:'term_days',label:'Prazo de pagamento',required:false,aliases:['prazo','prazo de pagamento','prazo pagamento','prazo em dias','dias','dias de prazo']},
     {key:'due_date',label:'Data de vencimento',required:false,aliases:['vencimento','data de vencimento','data vencimento','venc','vence em']},
     {key:'amount_cents',label:'Valor da nota fiscal',required:true,aliases:['valor','valor da nota fiscal','valor da nota','valor nf','valor da nf','valor r','valor r$','total','valor total']},
     {key:'consultant',label:'Consultor ou vendedor',required:false,aliases:['consultor','consultor responsavel','consultor ou vendedor','vendedor','responsavel','vendedor responsavel','nome do consultor']},
     {key:'consultant_email',label:'E-mail do consultor',required:false,aliases:['email','e-mail','email do consultor','e-mail do consultor','email consultor','e-mail consultor','correio eletronico','contato email','e-mail do vendedor','email vendedor']},
     {key:'consultant_phone',label:'Telefone do consultor',required:false,aliases:['telefone','telefone do consultor','telefone consultor','telefone do vendedor','celular','whatsapp','fone']},
-    {key:'funding_source',label:'Origem dos recursos',required:false,aliases:['origem dos recursos','origem do recurso','origem','fonte de recursos','funding source']},
+    {key:'funding_source',label:'Origem dos recursos',required:false,aliases:['origem dos recursos','origem do recurso','origem','fonte de recursos','fonte','recurso','recursos','tipo de recurso','pagamento','forma de pagamento','funding source']},
     {key:'bank_name',label:'Nome do banco',required:false,aliases:['banco','nome do banco','instituicao financeira']}
   ].map(field=>Object.freeze({...field,aliases:Object.freeze(field.aliases)})));
   const validated=new WeakMap();
@@ -327,12 +327,23 @@
       }
       value.amount_cents=parseAmount(raw('amount_cents'));if(value.amount_cents===null)errors.push('Informe um valor de NF válido, maior que zero.');
       const phone=text('consultant_phone');value.consultant_phone=normalizePhone(phone);if(phone&&!value.consultant_phone)warnings.push('Telefone do consultor inválido: informe código do país e DDD. O telefone será ignorado.');
-      const funding=normalizeHeader(text('funding_source')||defaults.funding_source||'');
+      const fundingRaw=text('funding_source')||defaults.funding_source||'';
+      const funding=normalizeHeader(fundingRaw);
       value.bank_name=text('bank_name')||String(defaults.bank_name||'').trim();
-      if(['bank','banco','bancario'].includes(funding))value.funding_source='bank';
-      else if(['own','recursos proprios','recurso proprio','proprio','proprios'].includes(funding))value.funding_source='own';
-      else if(funding&&!['unspecified','nao informado'].includes(funding))errors.push('Origem dos recursos inválida. Informe Banco ou Recursos próprios.');
-      else if(value.bank_name)value.funding_source='bank';
+      const knownBanks=['itau','bradesco','banco do brasil','santander','caixa','caixa economica','sicoob','sicredi','safra','btg','nubank','inter','original','c6','bmg'];
+      const isKnownBank=knownBanks.some(b=>funding.includes(b))||funding.includes('banco')||funding.includes('bank');
+      if(['bank','banco','bancario'].includes(funding)||isKnownBank){
+        value.funding_source='bank';
+        if(!value.bank_name&&isKnownBank){
+          value.bank_name=fundingRaw.trim();
+        }
+      }else if(['own','recursos proprios','recurso proprio','proprio','proprios'].includes(funding)){
+        value.funding_source='own';
+      }else if(funding&&!['unspecified','nao informado'].includes(funding)){
+        errors.push('Origem dos recursos inválida. Informe Banco ou Recursos próprios.');
+      }else if(value.bank_name){
+        value.funding_source='bank';
+      }
       if(value.funding_source==='bank'&&(!value.bank_name||value.bank_name.length>80||/[\x00-\x1f]/.test(value.bank_name)))errors.push('Informe o nome do banco com até 80 caracteres.');
       if(value.funding_source!=='bank')value.bank_name='';
       if(value.funding_source==='unspecified')warnings.push('Origem dos recursos não informada. Complete o cadastro após a importação.');
